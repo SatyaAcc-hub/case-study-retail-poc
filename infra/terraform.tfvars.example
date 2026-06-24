@@ -1,0 +1,34 @@
+# terraform.tfvars.example
+# Copy this file to terraform.tfvars and fill in any values you want to override.
+# Variables with defaults shown below — omit any line to use the default.
+
+# Prefix applied to every resource name. Keep it short (<=10 chars) to avoid
+# Azure resource name length limits, especially for the storage account.
+resource_prefix = "apex-churn"
+
+# Azure region for all resources. Must be a region that supports all services
+# used in this deployment (Cosmos DB Serverless, Static Web Apps, etc.).
+location = "eastus"
+
+# Short label for the deployment environment. Used in resource tags.
+environment = "poc"
+
+# ---------------------------------------------------------------------------
+# Terraform Remote State Backend
+# The storage account and container must already exist before running
+# terraform init. Create them once with the bootstrap script (if provided)
+# or manually via the Azure CLI:
+#   az group create -n rg-apex-churn-tfstate -l eastus
+#   az storage account create -n apexchurntfstate -g rg-apex-churn-tfstate --sku Standard_LRS
+#   az storage container create -n tfstate --account-name apexchurntfstate
+# ---------------------------------------------------------------------------
+tf_state_resource_group  = "rg-apex-churn-tfstate"
+tf_state_storage_account = "apexchurntfstate"
+tf_state_container       = "tfstate"
+
+# AWS region used when calling Amazon Bedrock. Must match the region where
+# your Bedrock model access has been granted.
+aws_region = "us-east-1"
+
+# Name of the Cosmos DB SQL database (not the account — that is auto-named).
+cosmos_db_name = "apex-retail-poc"

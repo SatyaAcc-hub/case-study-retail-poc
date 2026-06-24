@@ -1,0 +1,104 @@
+name: Deploy UI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ui/**'
+      - '.github/workflows/ui.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy Static Web App
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+
+    defaults:
+      run:
+        working-directory: ./ui
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run type check
+        run: npx tsc --noEmit
+
+      - name: Run linter
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          NODE_ENV: production
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist-${{ github.run_id }}
+          path: ui/dist/
+          retention-days: 14
+
+      - name: Deploy to Azure Static Web Apps
+        id: deploy-swa
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: '/ui'
+          output_location: 'dist'
+          skip_app_build: false
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - name: Print deployment URL
+        run: |
+          echo "::notice title=Deployment URL::${{ steps.deploy-swa.outputs.static_web_app_url }}"
+          echo "Deployed to: ${{ steps.deploy-swa.outputs.static_web_app_url }}"
+
+      - name: Lighthouse CI (optional)
+        run: |
+          if command -v lhci &> /dev/null; then
+            lhci autorun --upload.target=temporary-public-storage \
+              --collect.url="${{ steps.deploy-swa.outputs.static_web_app_url }}" || true
+          else
+            echo "Lighthouse CI not installed, skipping"
+          fi
+        continue-on-error: true
+
+  # Close PR environment for pull requests
+  close_pull_request:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Preview
+    steps:
+      - name: Close Pull Request Environment
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: 'close'

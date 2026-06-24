@@ -1,0 +1,23 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "WEBSITE_NODE_DEFAULT_VERSION": "~20",
+    "COSMOS_DB_ENDPOINT": "REPLACE_ME",
+    "COSMOS_DB_KEY": "REPLACE_ME",
+    "AWS_ACCESS_KEY_ID": "REPLACE_ME",
+    "AWS_SECRET_ACCESS_KEY": "REPLACE_ME",
+    "AWS_REGION": "us-east-1",
+    "BEDROCK_SONNET_MODEL": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "BEDROCK_HAIKU_MODEL": "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "SERVICE_BUS_CONNECTION_STRING": "REPLACE_ME",
+    "COMMUNICATION_SERVICES_CONNECTION_STRING": "REPLACE_ME",
+    "APPROVAL_BASE_URL": "http://localhost:4280"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}

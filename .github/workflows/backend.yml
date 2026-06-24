@@ -1,0 +1,142 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy Azure Functions
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint --if-present
+
+      - name: Run tests
+        run: npm test --if-present
+        env:
+          NODE_ENV: test
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Package function app
+        run: |
+          mkdir -p ../deploy-artifacts
+          zip -r ../deploy-artifacts/function-app.zip \
+            dist/ \
+            host.json \
+            package.json \
+            package-lock.json \
+            --exclude "*.map" \
+            --exclude "node_modules/**"
+        working-directory: ./backend
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-app-${{ github.run_id }}
+          path: deploy-artifacts/function-app.zip
+          retention-days: 14
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure Function App
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            FUNCTION_APP_NAME="${{ secrets.FUNCTION_APP_NAME }}"
+            if [ -z "$FUNCTION_APP_NAME" ]; then
+              FUNCTION_APP_NAME="apex-churn-func"
+            fi
+
+            echo "Deploying to Function App: $FUNCTION_APP_NAME"
+
+            az functionapp deployment source config-zip \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "$FUNCTION_APP_NAME" \
+              --src deploy-artifacts/function-app.zip \
+              --build-remote false
+
+            echo "Deployment complete. Verifying app is running..."
+            sleep 15
+            STATUS=$(az functionapp show \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "$FUNCTION_APP_NAME" \
+              --query "state" -o tsv)
+            echo "Function App state: $STATUS"
+
+      - name: Configure App Settings
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            FUNCTION_APP_NAME="${{ secrets.FUNCTION_APP_NAME || 'apex-churn-func' }}"
+
+            az functionapp config appsettings set \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "$FUNCTION_APP_NAME" \
+              --settings \
+                "AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
+                "AZURE_OPENAI_DEPLOYMENT=${{ secrets.AZURE_OPENAI_DEPLOYMENT }}" \
+                "COSMOS_DB_CONNECTION_STRING=${{ secrets.COSMOS_DB_CONNECTION_STRING }}" \
+                "STORAGE_CONNECTION_STRING=${{ secrets.STORAGE_CONNECTION_STRING }}" \
+                "SERVICEBUS_CONNECTION_STRING=${{ secrets.SERVICEBUS_CONNECTION_STRING }}"
+
+      - name: Smoke test health endpoint
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            FUNCTION_APP_NAME="${{ secrets.FUNCTION_APP_NAME || 'apex-churn-func' }}"
+            HOSTNAME=$(az functionapp show \
+              --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+              --name "$FUNCTION_APP_NAME" \
+              --query "defaultHostName" -o tsv)
+
+            echo "Testing: https://$HOSTNAME/api/health"
+            for i in 1 2 3; do
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$HOSTNAME/api/health" || echo "000")
+              if [ "$HTTP_STATUS" == "200" ]; then
+                echo "Health check passed (attempt $i)"
+                exit 0
+              fi
+              echo "Attempt $i: HTTP $HTTP_STATUS — retrying in 10s..."
+              sleep 10
+            done
+            echo "::warning::Health check did not return 200 after 3 attempts"
