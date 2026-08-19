@@ -6,6 +6,42 @@ An end-to-end proof-of-concept that detects customer churn risk across 6 isolate
 
 ---
 
+## Project Context
+
+### Business Problem
+- Retail businesses lose high-value customers silently — churn signals are scattered across CRM, e-commerce, loyalty, email, support, and analytics platforms with no unified view
+- Manual analysis of 6 disconnected systems is too slow and inconsistent to act on at scale
+- Retention campaigns often reach customers too late, or with generic offers that fail to convert
+
+### What This POC Demonstrates
+- **AI-powered churn detection** — Claude Sonnet 4.5 analyses signals from 6 data sources and produces a scored risk assessment (0–100) with cited evidence
+- **Automated offer matching** — AI selects the most relevant retention offer from a 15-item catalog based on the customer's risk profile and behaviour
+- **Personalised outreach generation** — Claude Haiku 4.5 drafts email, SMS, and push notification copy tailored to the individual customer
+- **Human-in-the-loop governance** — a CSM reviews the AI's full reasoning before any campaign is dispatched; auto-rejects after 24 hours if no action is taken
+- **End-to-end audit trail** — every step is logged to an append-only audit log with a 1-year retention period
+
+### Technical Approach
+- **Multi-agent orchestration** via Azure Durable Functions — fan-out data collection runs 6 collectors in parallel, then a sequential AI pipeline processes results
+- **AWS Bedrock** hosts the Claude models; credentials are stored in Azure Key Vault and accessed via managed identity — no secrets in code
+- **Dual-write approval pattern** — the approval API updates Cosmos directly AND raises a Durable Functions external event, so the UI reflects the decision instantly without polling
+- **Mock-first development** — all 6 data collectors fall back to realistic mock data for `CUST-000142`, enabling full end-to-end demos without live data
+
+### Key Constraints & Design Decisions
+- Target latency: **under 2 minutes** from trigger to pending approval record written
+- Bedrock calls use **3 retries with exponential backoff** (1 s / 2 s) to handle transient throttling
+- Outreach copy enforces **hard character limits** at generation time (SMS ≤160, push headline ≤60, push body ≤120)
+- Campaign dispatch (`notifyCrmManager`, `dispatchCampaign`) are **console stubs** — intentionally left unwired for the POC to avoid accidental sends
+- Every Azure Function must be **explicitly imported in `index.ts`** — the runtime will silently skip any unregistered function
+
+### Stack at a Glance
+- **Frontend:** React 18 + Vite + Tailwind CSS, hosted on Azure Static Web Apps
+- **Backend:** Azure Functions v4, Node 20, TypeScript, Durable Functions
+- **AI:** AWS Bedrock — Claude Sonnet 4.5 (reasoning) + Claude Haiku 4.5 (copy generation)
+- **Data:** Azure Cosmos DB Serverless — 9 containers across source data, campaigns, and audit log
+- **Infrastructure:** Terraform on Azure (Consumption plan, Key Vault, Service Bus, ACS)
+
+---
+
 ## Architecture Overview
 
 ```
